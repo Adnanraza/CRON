@@ -12,8 +12,8 @@ var spyd_access_token = "";
 writelog("Service Started");
 
 //cron.schedule('0 0 0 * * *', () => {
-  writelog("-------------------------------------CRON job started------------------------------------");
-  startProcess();
+writelog("-------------------------------------CRON job started------------------------------------");
+startProcess();
 //});
 
 function startProcess() {
@@ -91,6 +91,7 @@ async function uploadQuestions() {
 
         var cogs_Data = result.data.data;
         var insertArray = [];
+        var deleteArray = [];
 
         writelog("Fetching SPYD Questions");
 
@@ -106,39 +107,46 @@ async function uploadQuestions() {
 
           writelog("SPYD Questions fetched. Count: " + empDataSet.length);
 
-          // cogs_Data.forEach(emp => {
+          cogs_Data.forEach(emp => {
 
-          //   if (emp.attributes["profile-picture"] != null) {
-          //     var data = empDataSet.filter(x => emp.attributes["profile-picture"] != null && emp.attributes["profile-picture"].toString().replace(":443", "") == x.url.toString().replace(":443", ""))
+            if (emp.attributes["profile-picture"] != null) {
+              var data = empDataSet.filter(x => emp.attributes["profile-picture"] != null && emp.attributes["profile-picture"].toString().replace(":443", "") == x.url.toString().replace(":443", ""))
 
-          //     if (data.length < 1) {
-          //       if (imageExists(emp.attributes["profile-picture"])) {
-          //         insertArray.push(emp);
-          //       }
-          //       else {
-          //         writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
-          //       }
-          //     }
-          //   } else {
-          //     writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
-          //   }
-          // })
+              if (data.length < 1) {
+                if (imageExists(emp.attributes["profile-picture"])) {
+                  insertArray.push(emp);
+                }
+                else {
+                  writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
+                }
+              }
+            } else {
+              writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
+            }
+          })
 
+          var prom = [];
           for (var i = 0; i < empDataSet.length; i++) {
             var data = cogs_Data.filter(x => x.attributes["profile-picture"] != null && x.attributes["profile-picture"] == empDataSet[i].url);
 
-            //if (data.length < 1) 
-            {
+            if (data.length < 1) {
               writelog("Deleting Question " + JSON.stringify(empDataSet[i].options));
               writelog("Deleting question: " + empDataSet[i].question_id);
-              var response = await axios({
-                method: 'delete',
-                url: config.SPYD_DELETE_QUESTION_API + empDataSet[i].question_id,
-                headers: { 'x-access-token': spyd_access_token }
-              });
 
-              writelog(response.data.results);
+
+              deleteArray.push(empDataSet[i].question_id)
+
             }
+          }
+
+          if (deleteArray.length > 0) {
+
+            /// Deleting in active employees
+            var res = await axios.post(config.SPYD_DELETE_BULK_QUESTION_API, { question_ids: deleteArray }
+              , { headers: { 'x-access-token': spyd_access_token } });
+
+            writelog("Questions deleted");
+            console.log(res.data);
           }
         }
         else {
@@ -153,6 +161,11 @@ async function uploadQuestions() {
             }
           })
         }
+
+        if (insertArray.length == 0) {
+          return;
+        }
+
 
         workbook.xlsx.readFile(config.TEMPLATE_FILENAME)
           .then(function () {
@@ -180,7 +193,7 @@ async function uploadQuestions() {
                   }
                 }
 
-              //  uploadQuestionsData(array);
+                uploadQuestionsData(array);
               });
 
             });
