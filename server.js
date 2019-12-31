@@ -11,10 +11,10 @@ var spyd_access_token = "";
 
 writelog("Service Started");
 
-//cron.schedule('0 0 0 * * *', () => {
-writelog("-------------------------------------CRON job started------------------------------------");
-startProcess();
-//});
+cron.schedule('0 0 0 * * *', () => {
+  writelog("-------------------------------------CRON job started------------------------------------");
+  startProcess();
+});
 
 function startProcess() {
   writelog("Fetching SPYD token");
@@ -132,10 +132,7 @@ async function uploadQuestions() {
             if (data.length < 1) {
               writelog("Deleting Question " + JSON.stringify(empDataSet[i].options));
               writelog("Deleting question: " + empDataSet[i].question_id);
-
-
-              deleteArray.push(empDataSet[i].question_id)
-
+              deleteArray.push(empDataSet[i].question_id);
             }
           }
 
