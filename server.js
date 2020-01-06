@@ -11,10 +11,10 @@ var spyd_access_token = "";
 
 writelog("Service Started");
 
-cron.schedule('0 0 0 * * *', () => {
-  writelog("-------------------------------------CRON job started------------------------------------");
-  startProcess();
-});
+//cron.schedule('0 0 0 * * *', () => {
+writelog("-------------------------------------CRON job started------------------------------------");
+startProcess();
+//});
 
 function startProcess() {
   writelog("Fetching SPYD token");
@@ -36,7 +36,7 @@ function imageExists(image_url) {
   http.open('HEAD', image_url, false);
   http.send();
 
-  return http.status != 404;
+  return http.status == 200;
 }
 
 function LoadWorkbookRows(empArray, worksheet, indexes, lookupArray) {
@@ -73,135 +73,135 @@ function LoadWorkbookRows(empArray, worksheet, indexes, lookupArray) {
 
 
 async function uploadQuestions() {
-  writelog("Fetching cogs token");
-  axios.post(config.COGS_LOGIN_API, querystring.stringify(config.COGS_CREDENTIALS), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
-    .then((result) => {
-      var token = result.data.data.attributes["access-token"];
+  writelog("Fetching employees data from cogs");
 
-      writelog("Cogs token fetched");
-      writelog("Fetching employees data from cogs");
+  axios({
+    method: 'get',
+    url: config.COGS_GET_EMPLOYEESDATA_API,
+    headers: config.COGS_EXTERNAL_API_HEADER
+  }).then(async function (result) {
 
-      axios({
-        method: 'get',
-        url: config.COGS_GET_EMPLOYEESDATA_API,
-        headers: { 'Authorization': "Bearer " + token }
-      }).then(async function (result) {
+    writelog("Employees data fetched from cogs. Count: " + result.data.data.length);
 
-        writelog("Employees data fetched from cogs. Count: " + result.data.data.length);
+    var cogs_Data = result.data.data;
+    var insertArray = [];
+    var deleteArray = [];
 
-        var cogs_Data = result.data.data;
-        var insertArray = [];
-        var deleteArray = [];
+    writelog("Fetching SPYD Questions");
 
-        writelog("Fetching SPYD Questions");
+    var questions = await axios({
+      method: 'get',
+      url: config.SPYD_GET_QUESTIONS_API,
+      headers: { 'x-access-token': spyd_access_token }
+    });
 
-        var questions = await axios({
-          method: 'get',
-          url: config.SPYD_GET_QUESTIONS_API,
-          headers: { 'x-access-token': spyd_access_token }
-        });
+    var empDataSet = questions.data.results;
 
-        var empDataSet = questions.data.results;
+    if (empDataSet.length > 0) {
 
-        if (empDataSet.length > 0) {
+      writelog("SPYD Questions fetched. Count: " + empDataSet.length);
 
-          writelog("SPYD Questions fetched. Count: " + empDataSet.length);
+      cogs_Data.forEach(emp => {
 
-          cogs_Data.forEach(emp => {
+        if (emp.attributes["profile-picture"] != null) {
+          var data = empDataSet.filter(x => emp.attributes["profile-picture"] != null && emp.attributes["profile-picture"].toString().replace(":443", "") == x.url.toString().replace(":443", ""))
 
-            if (emp.attributes["profile-picture"] != null) {
-              var data = empDataSet.filter(x => emp.attributes["profile-picture"] != null && emp.attributes["profile-picture"].toString().replace(":443", "") == x.url.toString().replace(":443", ""))
-
-              if (data.length < 1) {
-                if (imageExists(emp.attributes["profile-picture"])) {
-                  insertArray.push(emp);
-                }
-                else {
-                  writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
-                }
-              }
-            } else {
-              writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
-            }
-          })
-
-          var prom = [];
-          for (var i = 0; i < empDataSet.length; i++) {
-            var data = cogs_Data.filter(x => x.attributes["profile-picture"] != null && x.attributes["profile-picture"] == empDataSet[i].url);
-
-            if (data.length < 1) {
-              writelog("Deleting Question " + JSON.stringify(empDataSet[i].options));
-              writelog("Deleting question: " + empDataSet[i].question_id);
-              deleteArray.push(empDataSet[i].question_id);
-            }
-          }
-
-          if (deleteArray.length > 0) {
-
-            /// Deleting in active employees
-            var res = await axios.post(config.SPYD_DELETE_BULK_QUESTION_API, { question_ids: deleteArray }
-              , { headers: { 'x-access-token': spyd_access_token } });
-
-            writelog("Questions deleted");
-            console.log(res.data);
-          }
-        }
-        else {
-          writelog("No questions found on quiz");
-
-          cogs_Data.forEach(emp => {
-            if (emp.attributes["profile-picture"] != null && imageExists(emp.attributes["profile-picture"])) {
+          if (data.length < 1) {
+            if (imageExists(emp.attributes["profile-picture"])) {
               insertArray.push(emp);
             }
             else {
               writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
             }
-          })
+          }
+          else if (!imageExists(data[0]["url"])) {
+            deleteArray.push(data[0]["question_id"]);
+          }
+        } else {
+          writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
         }
-
-        if (insertArray.length == 0) {
-          return;
-        }
-
-
-        workbook.xlsx.readFile(config.TEMPLATE_FILENAME)
-          .then(function () {
-
-            var index = 1;
-            var rowIndex = 1;
-            var worksheet = workbook.getWorksheet(1);
-
-            var males = insertArray.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'm');
-            var females = insertArray.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'f');
-
-            var indexes = LoadWorkbookRows(males, worksheet, { "index": index, "rowIndex": rowIndex }, cogs_Data.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'm'));
-            indexes = LoadWorkbookRows(females, worksheet, { "index": indexes.index, "rowIndex": indexes.rowIndex }, cogs_Data.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'f'));
-
-            var wb = workbook.xlsx.writeFile(config.FILENAME).then(() => {
-              fs.readFile(config.FILENAME, null, function (err, data) {
-
-                var int8View = new Uint8Array(data);
-                var array = [];
-                var count = 0;
-                var str = '';
-                for (var attr in int8View) {
-                  if (int8View.hasOwnProperty(attr)) {
-                    array[count++] = int8View[attr];
-                  }
-                }
-
-                uploadQuestionsData(array);
-              });
-
-            });
-          });
-      }).catch((err) => {
-        writelog("error: " + err);
       })
-    })
-    .catch((err) => {
-      writelog("error: " + err);
-    })
+
+      var prom = [];
+      for (var i = 0; i < empDataSet.length; i++) {
+        var data = cogs_Data.filter(x => x.attributes["profile-picture"] != null && x.attributes["profile-picture"] == empDataSet[i].url);
+
+        if (data.length < 1) {
+          writelog("Deleting Question " + JSON.stringify(empDataSet[i].options));
+          writelog("Deleting question: " + empDataSet[i].question_id);
+          deleteArray.push(empDataSet[i].question_id);
+        }
+        
+        if (!imageExists(empDataSet[i].url)) {
+          writelog("Deleting Question " + JSON.stringify(empDataSet[i].options));
+          writelog("Deleting question: " + empDataSet[i].question_id);
+          deleteArray.push(empDataSet[i].question_id);
+        }
+      }
+
+      if (deleteArray.length > 0) {
+
+        /// Deleting in active employees
+        var res = await axios.post(config.SPYD_DELETE_BULK_QUESTION_API, { question_ids: deleteArray }
+          , { headers: { 'x-access-token': spyd_access_token } });
+
+        writelog("Questions deleted");
+        console.log(res.data);
+      }
+    }
+    else {
+      writelog("No questions found on quiz");
+
+      cogs_Data.forEach(emp => {
+        if (emp.attributes["profile-picture"] != null && imageExists(emp.attributes["profile-picture"])) {
+          insertArray.push(emp);
+        }
+        else {
+          writelog("Image (" + emp.attributes["profile-picture"] + ") not found for " + emp.attributes["full-name"]);
+        }
+      })
+    }
+
+    if (insertArray.length == 0) {
+      writelog("No records found to insert. Closing job.");
+      return;
+    }
+
+
+    workbook.xlsx.readFile(config.TEMPLATE_FILENAME)
+      .then(function () {
+
+        var index = 1;
+        var rowIndex = 1;
+        var worksheet = workbook.getWorksheet(1);
+
+        var males = insertArray.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'm');
+        var females = insertArray.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'f');
+
+        var indexes = LoadWorkbookRows(males, worksheet, { "index": index, "rowIndex": rowIndex }, cogs_Data.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'm'));
+        indexes = LoadWorkbookRows(females, worksheet, { "index": indexes.index, "rowIndex": indexes.rowIndex }, cogs_Data.filter(it => it.attributes["gender"] != null && it.attributes["gender"].toLowerCase() === 'f'));
+
+        var wb = workbook.xlsx.writeFile(config.FILENAME).then(() => {
+          fs.readFile(config.FILENAME, null, function (err, data) {
+
+            var int8View = new Uint8Array(data);
+            var array = [];
+            var count = 0;
+            var str = '';
+            for (var attr in int8View) {
+              if (int8View.hasOwnProperty(attr)) {
+                array[count++] = int8View[attr];
+              }
+            }
+
+            uploadQuestionsData(array);
+          });
+
+        });
+      });
+  }).catch((err) => {
+    writelog("error: " + err);
+  })
 }
 
 function uploadQuestionsData(array) {
@@ -297,6 +297,6 @@ function getUniqueRandomNumbers(len) {
 
 function writelog(log) {
   console.log(log);
-  fs.appendFileSync("logs/" + new Date().toLocaleDateString() + ".txt", (new Date()).toLocaleString() + " >>>> ");
-  fs.appendFileSync("logs/" + new Date().toLocaleDateString() + ".txt", log + " \r\n");
+  fs.appendFileSync("logs/" + new Date().toDateString() + ".txt"
+    , (new Date()).toLocaleString() + " >>>> " + log + " \r\n");
 }
