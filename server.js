@@ -1,7 +1,6 @@
 const Excel = require('exceljs');
 const axios = require('axios');
 const fs = require('fs');
-const querystring = require('querystring');
 const uniqueRandom = require('unique-random');
 const config = require('./config');
 var workbook = new Excel.Workbook();
@@ -11,10 +10,10 @@ var spyd_access_token = "";
 
 writelog("Service Started");
 
-//cron.schedule('0 0 0 * * *', () => {
+cron.schedule('0 0 0 * * *', () => {
 writelog("-------------------------------------CRON job started------------------------------------");
 startProcess();
-//});
+});
 
 function startProcess() {
   writelog("Fetching SPYD token");
@@ -122,7 +121,6 @@ async function uploadQuestions() {
         }
       })
 
-      var prom = [];
       for (var i = 0; i < empDataSet.length; i++) {
         var data = cogs_Data.filter(x => x.attributes["profile-picture"] != null && x.attributes["profile-picture"] == empDataSet[i].url);
 
